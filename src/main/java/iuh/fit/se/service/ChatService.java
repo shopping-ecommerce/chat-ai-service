@@ -46,7 +46,7 @@ public class ChatService {
         log.info("🔧 ChatClient created with tools: {}", searchProductsTool.getClass().getSimpleName());
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(jdbcChatMemoryRepository)
-                .maxMessages(30)
+                .maxMessages(15)
                 .build();
 
         this.chatClient = chatClientBuilder
@@ -63,7 +63,7 @@ public class ChatService {
         // Kiểm tra yêu cầu tìm kiếm sản phẩm
         if (isProductSearchRequest(userMessage)) {
             String query = extractQuery(userMessage);
-            int limit = 5; // Mặc định 5 sản phẩm
+            int limit = 3; // Mặc định 5 sản phẩm
             log.info("Manual product search: query={}, limit={}", query, limit);
             return searchProductsTool.searchProducts(query, limit);
         }
@@ -179,7 +179,7 @@ public class ChatService {
                         it.price = extractPrice(p);
                         it.discount = (p.getPercentDiscount() != null) ? p.getPercentDiscount().doubleValue() : 0.0;
                         it.description = (p.getDescription() != null) ? p.getDescription() : "";
-                        it.url = "/product/" + it.id;
+                        it.url = "/products/" + it.id;
                         it.imageUrl = pickImageUrl(p);
                         return it;
                     })
