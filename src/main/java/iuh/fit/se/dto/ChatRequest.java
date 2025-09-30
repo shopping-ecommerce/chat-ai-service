@@ -1,5 +1,4 @@
 package iuh.fit.se.dto;
 
-public record ChatRequest(String message) {
-
+public record ChatRequest(String message, String conversationId) {
 }
