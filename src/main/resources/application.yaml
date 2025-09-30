@@ -1,8 +1,21 @@
 server:
   port: 8085
 spring:
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URI:http://elasticsearch:9200}
+    connection-timeout: 5s
+    socket-timeout: 10s
+    max-retry-attempts: 3
+  data:
+    elasticsearch:
+      index-name: products
   application:
     name: chat-ai-service
+  datasource:
+    url: ${DBMS_CONNECTION:jdbc:mariadb://mariadb:3306/chat_ai_db}
+    driver-class-name: "org.mariadb.jdbc.Driver"
+    username: ${DBMS_USERNAME:root}
+    password: ${DBMS_PASSWORD:sapassword}
   ai:
     openai:
       api-key: ${GEMINI_KEY}
@@ -10,4 +23,12 @@ spring:
         base-url: https://generativelanguage.googleapis.com
         completions-path: /v1beta/chat/completions
         options:
-          model: gemini-2.0-flash
+          model: gemini-2.5-pro
+          temperature: 0.1
+          # Thêm các options này để force tool calling
+          max-tokens: 2000
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
