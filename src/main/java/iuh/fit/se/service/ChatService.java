@@ -165,7 +165,7 @@ public class ChatService {
     // trong ChatService.SearchProductsTool
     @Component
     public static class SearchProductsTool {
-        private static final double SIM_THRESHOLD = 0.85; // giữ như bạn đang dùng
+        private static final double SIM_THRESHOLD = 0.7; // giữ như bạn đang dùng
         private final ObjectMapper mapper = new ObjectMapper();
         private final GeminiClient geminiClient;
 
