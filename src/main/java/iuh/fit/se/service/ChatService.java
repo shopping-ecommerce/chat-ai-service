@@ -259,7 +259,10 @@ public class ChatService {
                         .filter(r -> normalizeSimilarity(r.getSimilarityScore()) >= threshold)
                         .limit(tk)
                         .toList();
-
+                for ( var r : filtered
+                     ) {
+                    log.info("Image search result: id={}, sim={}", extractId(r.getProduct()), normalizeSimilarity(r.getSimilarityScore()));
+                }
                 if (filtered.isEmpty()) {
                     return emptyPayload("độ tương đồng < " + threshold,"");
                 }
@@ -272,7 +275,7 @@ public class ChatService {
                     it.id = extractId(p);
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
                     it.description = strOrDefault(p.get("description"), "");
-                    it.price = extractFirstPriceFromSizes(p.get("sizes"));   // giá = size đầu tiên
+                    it.price = extractFirstPriceFromSizes(p.get("variants"));   // giá = size đầu tiên
                     it.discount = extractDouble(p.get("percentDiscount"), 0.0);
                     it.url = "/products/" + it.id;
                     it.imageUrl = pickFirstImage(p);                         // ảnh đầu tiên
