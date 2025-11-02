@@ -219,7 +219,7 @@ public class ChatService {
                     it.id = extractId(p);                                       // _id có thể là String hoặc {"$oid": "..."}
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
                     it.description = strOrDefault(p.get("description"), "");
-                    it.price = extractFirstPriceFromSizes(p.get("sizes"));      // CHANGED: lấy giá đầu tiên trong sizes
+                    it.price = extractFirstPriceFromSizes(p.get("variants"));      // CHANGED: lấy giá đầu tiên trong sizes
                     it.discount = extractDouble(p.get("percentDiscount"), 0.0); // percentDiscount: 25 hoặc 25.0
                     it.url = "/products/" + it.id;
                     it.imageUrl = pickFirstImage(p);                            // images[0].url
