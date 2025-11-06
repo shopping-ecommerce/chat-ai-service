@@ -21,10 +21,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.text.Normalizer;
+import java.util.*;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
@@ -49,7 +48,7 @@ public class ChatService {
 
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(jdbcChatMemoryRepository)
-                .maxMessages(15)
+                .maxMessages(10)
                 .build();
 
         this.chatClient = chatClientBuilder
@@ -62,17 +61,19 @@ public class ChatService {
                 ? UUID.randomUUID().toString()
                 : request.conversationId();
 
-        String userMessage = request.message().toLowerCase();
+        String userMessage = request.message();
+        String normalized = normalizeVietnamese(userMessage);
 
-        // Nếu là yêu cầu tìm kiếm sản phẩm -> dùng Semantic search (Gemini)
-        if (isProductSearchRequest(userMessage)) {
-            String query = extractQuery(userMessage);
-            int limit = 4; // mặc định
-            log.info("Semantic product search ONLY: query={}, limit={}", query, limit);
+        // Kiểm tra có phải yêu cầu tìm kiếm sản phẩm không
+        if (isProductSearchRequest(normalized)) {
+            // ✅ KHÔNG chuyển về không dấu nữa – giữ nguyên dấu y như người dùng gõ
+            String query = (userMessage == null) ? "" : userMessage.trim();
+            int limit = extractLimit(normalized);
+            log.info("🔍 Semantic product search: query='{}', limit={}", query, limit);
             return searchProductsTool.searchProducts(query, limit);
         }
 
-        // Các yêu cầu khác -> gọi LLM như cũ
+        // Các yêu cầu khác -> gọi LLM
         Prompt prompt = new Prompt(
                 new SystemMessage(SYSTEM_PROMPT),
                 new UserMessage(request.message())
@@ -80,7 +81,7 @@ public class ChatService {
 
         ChatOptions chatOptions = ChatOptions.builder()
                 .temperature(0.25)
-                .maxTokens(2000)
+                .maxTokens(1000)
                 .build();
 
         try {
@@ -95,18 +96,165 @@ public class ChatService {
         }
     }
 
-    private boolean isProductSearchRequest(String message) {
-        String[] keywords = {"tìm", "có", "sản phẩm", "mua", "giày", "áo", "quần"};
-        return Arrays.stream(keywords).anyMatch(message::contains);
+
+    /**
+     * Chuẩn hóa tiếng Việt: loại bỏ dấu, chuyển thường, xử lý typo phổ biến
+     */
+    private String normalizeVietnamese(String text) {
+        if (text == null) return "";
+
+        // Chuyển thường
+        String lower = text.toLowerCase();
+
+        // Loại bỏ dấu tiếng Việt
+        String temp = Normalizer.normalize(lower, Normalizer.Form.NFD);
+        Pattern pattern = Pattern.compile("\\p{InCombiningDiacriticalMarks}+");
+        String noDiacritics = pattern.matcher(temp).replaceAll("");
+
+        // Xử lý một số typo phổ biến
+        noDiacritics = noDiacritics
+                .replaceAll("\\bko\\b", "khong")          // ko -> không
+                .replaceAll("\\bk\\b", "khong")           // k -> không
+                .replaceAll("\\bmk\\b", "minh")           // mk -> mình
+                .replaceAll("\\bsp\\b", "san pham")       // sp -> sản phẩm
+                .replaceAll("\\bdc\\b", "duoc")           // dc -> được
+                .replaceAll("\\boj\\b", "nhe")            // oj -> nhé
+                .replaceAll("\\ba\\s+k\\b", "khong")      // a k -> à không
+                .replaceAll("\\s+", " ")                  // nhiều space -> 1 space
+                .trim();
+
+        return noDiacritics;
     }
 
-    private String extractQuery(String message) {
-        String[] stopwords = {"tìm", "có", "sản phẩm", "mua"};
-        String query = message;
-        for (String stopword : stopwords) {
-            query = query.replaceAll("(?i)" + stopword, "").trim();
+    /**
+     * Kiểm tra có phải yêu cầu tìm sản phẩm không (bao quát hơn)
+     */
+    private boolean isProductSearchRequest(String normalized) {
+        // Từ khóa tìm kiếm
+        String[] searchKeywords = {
+                "tim", "tim kiem", "search", "cho", "cho xem", "goi y",
+                "co", "co khong", "ban", "mua", "muon mua", "can", "can mua"
+        };
+
+        // Loại sản phẩm
+        String[] productTypes = {
+                "san pham", "hang", "mon", "do", "quan", "ao", "giay",
+                "dep", "tui", "balo", "mu", "non", "khan", "vay", "dam",
+                "sneaker", "boot", "sandal", "hoodie", "sweater", "jacket",
+                "jeans", "short", "pant", "shirt", "dress", "skirt"
+        };
+
+        // Kiểm tra từ khóa tìm kiếm + loại sản phẩm
+        for (String keyword : searchKeywords) {
+            if (normalized.contains(keyword)) {
+                // Nếu có từ tìm kiếm và có từ liên quan sản phẩm
+                for (String product : productTypes) {
+                    if (normalized.contains(product)) {
+                        return true;
+                    }
+                }
+                // Hoặc chỉ có từ tìm kiếm + từ miêu tả (màu, size, brand...)
+                if (normalized.matches(".*(mau|size|loai|nhu|kieu|style|brand|hang|gia|re|dat).*")) {
+                    return true;
+                }
+            }
         }
-        return query.isEmpty() ? "" : query;
+
+        // Hoặc chỉ đơn giản là nhắc đến loại sản phẩm
+        for (String product : productTypes) {
+            if (normalized.contains(product)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Trích xuất query từ câu hỏi (giữ nguyên dấu từ bản gốc)
+     */
+    private String extractQuery(String normalized, String original) {
+        // Danh sách stopwords cần loại bỏ
+        Set<String> stopwords = new HashSet<>(Arrays.asList(
+                "tim", "tim kiem", "cho", "cho toi", "cho minh", "cho mk",
+                "goi y", "co", "co khong", "ban", "mua", "muon mua",
+                "can", "can mua", "search", "kiem", "xem", "show",
+                "hien thi", "lay", "get", "find", "give", "me",
+                "san pham", "sp", "hang", "mon", "do", "cai",
+                "gi", "nao", "the nao", "ra sao", "duoc khong"
+        ));
+
+        // Tách từ trong câu chuẩn hóa
+        String[] words = normalized.split("\\s+");
+        List<String> keepWords = new ArrayList<>();
+
+        for (int i = 0; i < words.length; i++) {
+            String word = words[i];
+
+            // Bỏ qua stopword đơn
+            if (stopwords.contains(word)) continue;
+
+            // Bỏ qua stopword ghép 2 từ
+            if (i < words.length - 1) {
+                String twoWords = word + " " + words[i + 1];
+                if (stopwords.contains(twoWords)) {
+                    i++; // skip cả 2 từ
+                    continue;
+                }
+            }
+
+            keepWords.add(word);
+        }
+
+        // Map lại sang bản gốc có dấu
+        String result = String.join(" ", keepWords).trim();
+
+        // Nếu kết quả rỗng, lấy toàn bộ câu gốc trừ stopwords đầu tiên
+        if (result.isEmpty()) {
+            String[] origWords = original.toLowerCase().split("\\s+");
+            StringBuilder sb = new StringBuilder();
+            boolean foundContent = false;
+
+            for (String w : origWords) {
+                String wNorm = normalizeVietnamese(w);
+                if (!stopwords.contains(wNorm) || foundContent) {
+                    sb.append(w).append(" ");
+                    foundContent = true;
+                }
+            }
+            result = sb.toString().trim();
+        }
+
+        return result.isEmpty() ? original : result;
+    }
+
+    /**
+     * Trích xuất số lượng kết quả mong muốn
+     */
+    private int extractLimit(String normalized) {
+        // Pattern: "cho/show/hien/lay [số] san pham"
+        Pattern pattern = Pattern.compile("(cho|show|hien|lay|tim|search)\\s+(\\d+)\\s+(san pham|sp|cai|mon)");
+        var matcher = pattern.matcher(normalized);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group(2));
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+
+        // Hoặc pattern: "[số] [sản phẩm] đầu tiên/dau/first"
+        pattern = Pattern.compile("(\\d+)\\s+(san pham|sp|cai|mon)\\s+(dau|first|top)");
+        matcher = pattern.matcher(normalized);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group(1));
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+
+        return 4; // default
     }
 
     public String chatWithImage(MultipartFile file, String message, String conversationId) {
@@ -114,20 +262,18 @@ public class ChatService {
                 ? UUID.randomUUID().toString()
                 : conversationId;
 
-        // 1) Nếu là ngữ cảnh mua sắm -> ưu tiên search bằng ảnh (multipart)
-        String lower = (message == null) ? "" : message.toLowerCase();
-        boolean wantShopping = lower.isBlank() || isProductSearchRequest(lower);
+        String normalized = normalizeVietnamese(message);
+        boolean wantShopping = normalized.isBlank() || isProductSearchRequest(normalized);
+
         if (wantShopping) {
             try {
-                // topK = 5, minSimilarity = 0.85 (bạn có thể chỉnh)
                 return searchProductsTool.searchProductsByImage(file, 5, 0.85);
             } catch (Exception ex) {
                 log.warn("Image search failed, falling back to vision chat. {}", ex.getMessage());
-                // tiếp tục fallback xuống LLM
             }
         }
 
-        // 2) Fallback: gửi ảnh + text cho LLM như trước
+        // Fallback: gửi ảnh + text cho LLM
         org.springframework.util.MimeType mime = org.springframework.util.MimeTypeUtils.APPLICATION_OCTET_STREAM;
         try {
             if (file != null && file.getContentType() != null) {
@@ -142,7 +288,7 @@ public class ChatService {
 
         ChatOptions chatOptions = ChatOptions.builder()
                 .temperature(0.25)
-                .maxTokens(2000)
+                .maxTokens(1000)
                 .build();
 
         try {
@@ -155,17 +301,14 @@ public class ChatService {
                     .content();
         } catch (Exception e) {
             log.error("Error calling Chat API with image: {}", e.getMessage());
-            return "Oops, có mấy khi lỗi xảy ra khi xử lý hình ảnh! Thử lại sau nhé 😅";
+            return "Oops, có lỗi xảy ra khi xử lý hình ảnh! Thử lại sau nhé 😅";
         }
     }
 
-
-    // ========== TOOL: dùng SEMANTIC SEARCH (Gemini) thay cho Elasticsearch ==========
-    // trong ChatService.java
-    // trong ChatService.SearchProductsTool
+    // ========== TOOL: dùng SEMANTIC SEARCH (Gemini) ==========
     @Component
     public static class SearchProductsTool {
-        private static final double SIM_THRESHOLD = 0.7; // giữ như bạn đang dùng
+        private static final double SIM_THRESHOLD = 0.7;
         private final ObjectMapper mapper = new ObjectMapper();
         private final GeminiClient geminiClient;
 
@@ -189,7 +332,7 @@ public class ChatService {
                 SearchResponse resp = geminiClient.semanticSearch(
                         SearchRequest.builder()
                                 .query(query)
-                                .topK(resultLimit)
+                                .topK(10)
                                 .build()
                 );
 
@@ -207,7 +350,6 @@ public class ChatService {
                     return emptyPayload(query, "độ tương đồng < " + SIM_THRESHOLD);
                 }
 
-                // Map đúng các field; giá lấy phần tử đầu tiên trong sizes
                 ProductSearchPayload payload = new ProductSearchPayload();
                 payload.message = (query == null || query.isBlank()) ? null
                         : ("kết quả cho: \"" + query + "\" (sim≥" + SIM_THRESHOLD + ")");
@@ -216,13 +358,13 @@ public class ChatService {
                     Map<String, Object> p = x.product;
 
                     ProductSearchPayload.Item it = new ProductSearchPayload.Item();
-                    it.id = extractId(p);                                       // _id có thể là String hoặc {"$oid": "..."}
+                    it.id = extractId(p);
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
                     it.description = strOrDefault(p.get("description"), "");
-                    it.price = extractFirstPriceFromSizes(p.get("variants"));      // CHANGED: lấy giá đầu tiên trong sizes
-                    it.discount = extractDouble(p.get("percentDiscount"), 0.0); // percentDiscount: 25 hoặc 25.0
+                    it.price = extractFirstPriceFromSizes(p.get("variants"));
+                    it.discount = extractDouble(p.get("percentDiscount"), 0.0);
                     it.url = "/products/" + it.id;
-                    it.imageUrl = pickFirstImage(p);                            // images[0].url
+                    it.imageUrl = pickFirstImage(p);
 
                     return it;
                 }).toList();
@@ -235,7 +377,6 @@ public class ChatService {
             }
         }
 
-
         @org.springframework.ai.tool.annotation.Tool(
                 name = "searchProductsByImage",
                 description = "Search similar products by image (multipart upload)."
@@ -246,7 +387,7 @@ public class ChatService {
                 @org.springframework.ai.tool.annotation.ToolParam(description = "Min similarity (0..1), optional") Double minSimilarity
         ) {
             int tk = (topK != null && topK > 0) ? topK : 4;
-            double threshold = (minSimilarity != null) ? minSimilarity : SIM_THRESHOLD; // dùng 0.85 mặc định
+            double threshold = (minSimilarity != null) ? minSimilarity : SIM_THRESHOLD;
 
             try {
                 var resp = geminiClient.searchByImageUpload(image, tk, 300, 8, threshold);
@@ -259,10 +400,11 @@ public class ChatService {
                         .filter(r -> normalizeSimilarity(r.getSimilarityScore()) >= threshold)
                         .limit(tk)
                         .toList();
-                for ( var r : filtered
-                     ) {
+
+                for (var r : filtered) {
                     log.info("Image search result: id={}, sim={}", extractId(r.getProduct()), normalizeSimilarity(r.getSimilarityScore()));
                 }
+
                 if (filtered.isEmpty()) {
                     return emptyPayload("độ tương đồng < " + threshold,"");
                 }
@@ -275,10 +417,10 @@ public class ChatService {
                     it.id = extractId(p);
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
                     it.description = strOrDefault(p.get("description"), "");
-                    it.price = extractFirstPriceFromSizes(p.get("variants"));   // giá = size đầu tiên
+                    it.price = extractFirstPriceFromSizes(p.get("variants"));
                     it.discount = extractDouble(p.get("percentDiscount"), 0.0);
                     it.url = "/products/" + it.id;
-                    it.imageUrl = pickFirstImage(p);                         // ảnh đầu tiên
+                    it.imageUrl = pickFirstImage(p);
                     return it;
                 }).toList();
 
@@ -289,6 +431,7 @@ public class ChatService {
                 return emptyPayload("lỗi gọi image search","lỗi");
             }
         }
+
         /* ------------ Helpers ------------ */
 
         private static class ResultWrap {
@@ -302,7 +445,7 @@ public class ChatService {
 
         private static double normalizeSimilarity(Double score) {
             if (score == null) return 0.0;
-            if (score > 1.0) {                    // nếu là distance
+            if (score > 1.0) {
                 double d = score;
                 return 1.0 / (1.0 + d);
             }
@@ -333,7 +476,7 @@ public class ChatService {
                 if (v == null) return def;
                 if (v instanceof Number n) return n.doubleValue();
                 if (v instanceof java.math.BigDecimal bd) return bd.doubleValue();
-                if (v instanceof Map<?,?> m) { // { "$numberLong": "11" }
+                if (v instanceof Map<?,?> m) {
                     Object nl = m.get("$numberLong");
                     if (nl != null) return Double.parseDouble(String.valueOf(nl));
                 }
@@ -343,7 +486,6 @@ public class ChatService {
             }
         }
 
-        /** _id: String | { "$oid": "..." } */
         @SuppressWarnings("unchecked")
         private static String extractId(Map<String, Object> product) {
             Object id = product.get("_id");
@@ -354,7 +496,6 @@ public class ChatService {
             return str(id);
         }
 
-        /** Giá = price của phần tử ĐẦU TIÊN trong mảng sizes (chuỗi hoặc số) */
         @SuppressWarnings("unchecked")
         private static Double extractFirstPriceFromSizes(Object sizes) {
             try {
@@ -370,7 +511,6 @@ public class ChatService {
             }
         }
 
-        /** "120000" | 120000 | BigDecimal | { $numberLong:"..." } -> double */
         private static double extractPriceFlexible(Object price) {
             if (price == null) return 0.0;
             if (price instanceof Number n) return n.doubleValue();
@@ -382,7 +522,6 @@ public class ChatService {
             try { return Double.parseDouble(price.toString()); } catch (Exception e) { return 0.0; }
         }
 
-        /** images: [{url, position}] | ["..."] → lấy url đầu tiên không phải .mp4 */
         @SuppressWarnings("unchecked")
         private static String pickFirstImage(Map<String, Object> productMap) {
             try {
@@ -403,5 +542,4 @@ public class ChatService {
             return "/img/default.png";
         }
     }
-
 }
