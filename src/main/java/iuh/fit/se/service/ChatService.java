@@ -80,8 +80,8 @@ public class ChatService {
         );
 
         ChatOptions chatOptions = ChatOptions.builder()
-                .temperature(0.25)
-                .maxTokens(1000)
+                .temperature(0.3)
+                .maxTokens(500)
                 .build();
 
         try {
@@ -287,8 +287,8 @@ public class ChatService {
                 .build();
 
         ChatOptions chatOptions = ChatOptions.builder()
-                .temperature(0.25)
-                .maxTokens(1000)
+                .temperature(0.3)
+                .maxTokens(500)
                 .build();
 
         try {
