@@ -33,4 +33,7 @@ public class PolicySimpleService {
                 .limit(Math.max(1, limit))
                 .toList();
     }
+    public List<Policy> getAll() {
+        return repo.findAll();
+    }
 }
