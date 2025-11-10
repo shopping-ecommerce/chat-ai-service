@@ -27,97 +27,59 @@ import java.util.*;
 @Slf4j
 public class ChatService {
 
+    // ====== PROMPT (đã siết luật "CHỈ JSON") ======
     private static final String SYSTEM_PROMPT = """
             Bạn là Shopping AI Assistant - trợ lý mua sắm thông minh cho sàn thương mại điện tử.
-            
+
             ## Khả năng của bạn:
-            1. **Tìm kiếm sản phẩm**: 
+            1. **Tìm kiếm sản phẩm**:
                - Sử dụng searchProducts() cho truy vấn văn bản
                - Sử dụng searchProductsByImage() khi người dùng gửi ảnh
-            
-            2. **Thông tin chính sách**: 
+
+            2. **Thông tin chính sách**:
                - Sử dụng policy_getByCode() khi biết mã chính sách (VD: PROHIBITED_ITEMS, SELLER_TOS)
                - Sử dụng policy_search() để tìm chính sách theo từ khóa
                - Sử dụng policy_listNewest() để liệt kê chính sách mới nhất
-            
+
             3. **Trò chuyện tự nhiên**: Trả lời các câu hỏi thường không cần dùng công cụ
-            
+
             ## Nguyên tắc hoạt động:
             - LUÔN trả lời bằng tiếng Việt khi người dùng nói tiếng Việt
             - LUÔN dùng công cụ tìm kiếm khi người dùng hỏi về sản phẩm, giá cả, tồn kho
             - LUÔN tra cứu chính sách khi người dùng hỏi về quy định, hoàn tiền, vi phạm, điều khoản
             - Trả lời ngắn gọn, thân thiện, có thể hài hước nhẹ nhàng
             - Nếu không biết, hãy thừa nhận thẳng thắn
-            
+
             ## Ví dụ sử dụng công cụ:
             - "Tìm áo hoodie màu đen" → searchProducts(query="áo hoodie màu đen", limit=4)
             - "Chính sách hoàn tiền như thế nào?" → policy_search(q="hoàn tiền", limit=5)
             - "Cho tôi xem code PROHIBITED_ITEMS" → policy_getByCode(code="PROHIBITED_ITEMS")
             - "Có sản phẩm nào giống cái này không?" (kèm ảnh) → searchProductsByImage()
             - "Hàng cấm là gì?" → policy_search(q="hàng cấm", limit=3)
-            
+
             ## ⚠️ QUAN TRỌNG - Định dạng trả về khi dùng searchProducts hoặc searchProductsByImage:
-            
+
             **Khi tool trả về kết quả sản phẩm:**
-            1. Tool sẽ cho bạn JSON với cấu trúc:
+            1) Tool sẽ trả về JSON với cấu trúc:
                {
                  "type": "product_list",
-                 "message": "Tìm thấy X sản phẩm...",
-                 "items": [
-                   {
-                     "id": "...",
-                     "name": "...",
-                     "price": 129000.0,
-                     "discount": 0.0,
-                     "description": "...",
-                     "url": "/products/...",
-                     "imageUrl": "https://..."
-                   }
-                 ]
+                 "message": "...",
+                 "items": [ { "id": "...", "name": "...", "price": 0.0, "discount": 0.0, "description": "...", "url": "/products/...", "imageUrl": "https://..." } ]
                }
-            
-            2. Bạn PHẢI trả về JSON NGUYÊN VẸN này cho user
-            3. KHÔNG được:
-               - Tóm tắt hay viết lại nội dung
-               - Chuyển sang markdown list
-               - Thay đổi cấu trúc JSON
-               - Thêm/bớt field nào
-            
-            4. CHỈ được phép:
-               - Thêm 1-2 câu nhận xét ngắn TRƯỚC JSON (không bắt buộc)
-               - Giữ NGUYÊN TOÀN BỘ JSON từ tool
-            
-            **Ví dụ response đúng:**
-            ```
-            Mình tìm thấy sản phẩm phù hợp với bạn rồi đây:
-            
-            {
-              "type": "product_list",
-              "message": "Tìm thấy 3 sản phẩm cho: \"áo hoodie\"",
-              "items": [
-                {
-                  "id": "68ff149c6a32474c840bb4a8",
-                  "name": "Áo hoodie basic",
-                  "price": 299000.0,
-                  "discount": 10.0,
-                  "description": "Áo hoodie cotton mềm mại",
-                  "url": "/products/68ff149c6a32474c840bb4a8",
-                  "imageUrl": "https://example.com/image.jpg"
-                }
-              ]
-            }
-            ```
-            
-            **Ví dụ response SAI (TUYỆT ĐỐI KHÔNG làm):**
-            ❌ "Mình tìm được 3 sản phẩm:
-                • Áo hoodie basic - 299,000đ
-                • ..."
-            ❌ Tóm tắt thành text
-            ❌ Thay đổi bất kỳ field nào trong JSON
-            
+            2) Bạn PHẢI trả về **CHỈ JSON NGUYÊN VẸN** này cho user (không thêm/bớt field, không thay đổi cấu trúc).
+            3) TUYỆT ĐỐI KHÔNG:
+               - Viết bất kỳ chữ nào trước/sau JSON (kể cả câu mở đầu như "Mình tìm thấy...")
+               - Bao JSON trong ``` ``` (code block)
+               - Tóm tắt thành text hay markdown list
+               - Thêm ghi chú, nhận xét hoặc metadata khác
+
+            **Ví dụ response sai (cấm làm):**
+            ❌ "Mình tìm thấy sản phẩm phù hợp với bạn rồi đây:" + {JSON}
+            ❌ ```json ... ```
+            ❌ Liệt kê bullet points thay vì JSON
+
             ## Định dạng trả về cho chính sách:
-            - Khi trả về chính sách: tóm tắt nội dung chính + trích dẫn chi tiết nếu cần
-            - Luôn thân thiện và hữu ích
+            - Khi trả về chính sách: tóm tắt nội dung chính + trích dẫn chi tiết nếu cần (được phép trả text)
             """;
 
     private final ChatClient chatClient;
@@ -140,17 +102,47 @@ public class ChatService {
                 .maxMessages(10)
                 .build();
 
-        // ✅ QUAN TRỌNG: Đăng ký tools với ChatClient
         this.chatClient = chatClientBuilder
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultTools(searchProductsTool, policyTool) // ✅ Đăng ký cả 2 tools
+                .defaultTools(searchProductsTool, policyTool)
                 .build();
 
         log.info("✅ ChatClient initialized successfully with {} tools", 2);
     }
 
     /**
-     * Chat với văn bản - để LLM tự quyết định dùng tool nào
+     * Gác cổng: cắt object JSON đầu tiên trong chuỗi (nếu có).
+     */
+    private static String extractFirstJsonObject(String text) {
+        if (text == null) return null;
+        int start = text.indexOf('{');
+        if (start < 0) return null;
+        int depth = 0;
+        boolean inStr = false;
+        char prev = 0;
+
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+
+            if (c == '"' && prev != '\\') {
+                inStr = !inStr;
+            }
+            if (!inStr) {
+                if (c == '{') depth++;
+                else if (c == '}') {
+                    depth--;
+                    if (depth == 0) {
+                        return text.substring(start, i + 1);
+                    }
+                }
+            }
+            prev = c;
+        }
+        return null;
+    }
+
+    /**
+     * Chat văn bản — để LLM tự quyết định tool. Nếu output có product_list, chỉ trả CHỈ JSON.
      */
     public String chat(ChatRequest request) {
         String conversationId = (request.conversationId() == null || request.conversationId().isBlank())
@@ -165,22 +157,33 @@ public class ChatService {
         );
 
         try {
-            String response = chatClient.prompt(prompt)
+            String raw = chatClient.prompt(prompt)
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                     .call()
                     .content();
 
             log.info("✅ Chat response generated successfully");
-            return response;
+
+            if (raw != null && raw.contains("\"type\"") && raw.contains("product_list")) {
+                String json = extractFirstJsonObject(raw);
+                if (json != null) {
+                    return json;
+                }
+                // fallback: nếu không cắt được thì trả stub JSON để FE không lỗi
+                return "{\"type\":\"product_list\",\"message\":\"Lỗi định dạng kết quả\",\"items\":[]}";
+            }
+
+            // Không phải product_list (vd: trả lời chính sách / small talk)
+            return raw;
 
         } catch (Exception e) {
             log.error("❌ Error calling Chat API: {}", e.getMessage(), e);
-            return "Oops, có lỗi xảy ra! Thử lại sau nhé 😅";
+            return "{\"type\":\"product_list\",\"message\":\"Lỗi xử lý\",\"items\":[]}";
         }
     }
 
     /**
-     * Chat với hình ảnh - ưu tiên tìm kiếm sản phẩm tương tự
+     * Chat với hình ảnh — ưu tiên search tương tự; nếu fallback vision chat và có product_list thì vẫn gác cổng JSON.
      */
     public String chatWithImage(MultipartFile file, String message, String conversationId) {
         String cid = (conversationId == null || conversationId.isBlank())
@@ -188,10 +191,9 @@ public class ChatService {
                 : conversationId;
 
         log.info("🖼️ Chat with image: conversationId={}, message='{}', fileSize={}",
-                cid, message, file.getSize());
+                cid, message, file != null ? file.getSize() : -1);
 
-        // ✅ Ưu tiên tìm kiếm sản phẩm theo ảnh
-        boolean isProductSearchIntent = message == null || message.isBlank() ||
+        boolean isProductSearchIntent = (message == null || message.isBlank()) ||
                 message.toLowerCase().contains("tìm") ||
                 message.toLowerCase().contains("giống") ||
                 message.toLowerCase().contains("tương tự") ||
@@ -207,22 +209,21 @@ public class ChatService {
             }
         }
 
-        // ✅ Fallback: gửi ảnh + text cho LLM phân tích
+        // Fallback vision chat
         org.springframework.util.MimeType mime = MimeTypeUtils.APPLICATION_OCTET_STREAM;
         try {
-            if (file.getContentType() != null) {
+            if (file != null && file.getContentType() != null) {
                 mime = MimeTypeUtils.parseMimeType(file.getContentType());
             }
-        } catch (Exception ignore) {
-        }
+        } catch (Exception ignore) { }
 
         Media media = Media.builder()
                 .mimeType(mime)
-                .data(file.getResource())
+                .data(file != null ? file.getResource() : null)
                 .build();
 
         try {
-            String response = chatClient.prompt()
+            String raw = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(u -> u.media(media).text(message))
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, cid))
@@ -230,15 +231,21 @@ public class ChatService {
                     .content();
 
             log.info("✅ Vision chat response generated successfully");
-            return response;
+
+            if (raw != null && raw.contains("\"type\"") && raw.contains("product_list")) {
+                String json = extractFirstJsonObject(raw);
+                if (json != null) return json;
+                return "{\"type\":\"product_list\",\"message\":\"Lỗi định dạng kết quả\",\"items\":[]}";
+            }
+            return raw;
 
         } catch (Exception e) {
             log.error("❌ Error calling Chat API with image: {}", e.getMessage(), e);
-            return "Oops, có lỗi xảy ra khi xử lý hình ảnh! Thử lại sau nhé 😅";
+            return "{\"type\":\"product_list\",\"message\":\"Lỗi xử lý hình ảnh\",\"items\":[]}";
         }
     }
 
-    // ========== TOOL: Tìm kiếm sản phẩm qua SEMANTIC SEARCH (Gemini) ==========
+    // ========== TOOL: Tìm kiếm sản phẩm (semantic) ==========
     @Component
     public static class SearchProductsTool {
         private static final double SIM_THRESHOLD = 0.7;
@@ -251,12 +258,10 @@ public class ChatService {
 
         @org.springframework.ai.tool.annotation.Tool(
                 name = "searchProducts",
-                description = "Tìm kiếm sản phẩm theo từ khóa văn bản. Sử dụng công cụ này khi người dùng hỏi về sản phẩm, giá cả, tìm đồ. " +
-                        "Tool này sẽ trả về JSON với cấu trúc {type, message, items[]}. " +
-                        "LLM PHẢI trả về JSON nguyên vẹn cho user, KHÔNG được tóm tắt hay chuyển sang markdown."
+                description = "Tìm kiếm sản phẩm theo từ khóa văn bản. Trả về JSON {type, message, items[]}. LLM phải trả **CHỈ JSON**."
         )
         public String searchProducts(
-                @org.springframework.ai.tool.annotation.ToolParam(description = "Từ khóa tìm kiếm (ví dụ: áo hoodie đen, giày thể thao)") String query,
+                @org.springframework.ai.tool.annotation.ToolParam(description = "Từ khóa tìm kiếm") String query,
                 @org.springframework.ai.tool.annotation.ToolParam(description = "Số lượng kết quả tối đa (mặc định: 4)") Integer limit) {
 
             int resultLimit = (limit != null && limit > 0) ? limit : 4;
@@ -288,7 +293,7 @@ public class ChatService {
                 }
 
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list"; // ✅ Thêm type
+                payload.type = "product_list";
                 payload.message = (query == null || query.isBlank()) ? null
                         : ("Tìm thấy " + passed.size() + " sản phẩm cho: \"" + query + "\"");
 
@@ -318,9 +323,7 @@ public class ChatService {
 
         @org.springframework.ai.tool.annotation.Tool(
                 name = "searchProductsByImage",
-                description = "Tìm kiếm sản phẩm tương tự dựa trên hình ảnh. Sử dụng khi người dùng upload ảnh và muốn tìm sản phẩm giống. " +
-                        "Tool này sẽ trả về JSON với cấu trúc {type, message, items[]}. " +
-                        "LLM PHẢI trả về JSON nguyên vẹn cho user, KHÔNG được tóm tắt hay chuyển sang markdown."
+                description = "Tìm kiếm sản phẩm tương tự dựa trên hình ảnh. Trả về JSON {type, message, items[]}. LLM phải trả **CHỈ JSON**."
         )
         public String searchProductsByImage(
                 @org.springframework.ai.tool.annotation.ToolParam(description = "File ảnh để tìm kiếm") MultipartFile image,
@@ -351,7 +354,7 @@ public class ChatService {
                 }
 
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list"; // ✅ Thêm type
+                payload.type = "product_list";
                 payload.message = "Tìm thấy " + filtered.size() + " sản phẩm tương tự từ hình ảnh";
                 payload.items = filtered.stream().map(r -> {
                     Map<String, Object> p = r.getProduct();
@@ -401,7 +404,7 @@ public class ChatService {
         private String emptyPayload(String query, String reason) {
             try {
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list"; // ✅ Thêm type
+                payload.type = "product_list";
                 payload.message = "Không tìm thấy sản phẩm phù hợp" +
                         (reason != null && !reason.isEmpty() ? " (" + reason + ")" : "");
                 payload.items = List.of();
@@ -469,8 +472,7 @@ public class ChatService {
                 if (nl != null) {
                     try {
                         return Double.parseDouble(String.valueOf(nl));
-                    } catch (Exception ignore) {
-                    }
+                    } catch (Exception ignore) { }
                 }
             }
             try {
@@ -496,8 +498,7 @@ public class ChatService {
                         }
                     }
                 }
-            } catch (Exception ignore) {
-            }
+            } catch (Exception ignore) { }
             return "/img/default.png";
         }
     }
