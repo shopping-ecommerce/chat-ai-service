@@ -12,7 +12,6 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
-import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -57,30 +56,43 @@ public class ChatService {
             - "Có sản phẩm nào giống cái này không?" (kèm ảnh) → searchProductsByImage()
             - "Hàng cấm là gì?" → policy_search(q="hàng cấm", limit=3)
             
-            ## ⚠️ CỰC KỲ QUAN TRỌNG - Định dạng trả về khi dùng searchProducts hoặc searchProductsByImage:
+            ## ⚠️ QUAN TRỌNG - Định dạng trả về khi dùng searchProducts hoặc searchProductsByImage:
             
-            **Khi tool trả về kết quả sản phẩm, bạn PHẢI:**
+            **Khi tool trả về kết quả sản phẩm:**
+            1. Tool sẽ cho bạn JSON với cấu trúc:
+               {
+                 "type": "product_list",
+                 "message": "Tìm thấy X sản phẩm...",
+                 "items": [
+                   {
+                     "id": "...",
+                     "name": "...",
+                     "price": 129000.0,
+                     "discount": 0.0,
+                     "url": "/products/...",
+                     "imageUrl": "https://..."
+                   }
+                 ]
+               }
             
-            1. CHỈ trả về JSON thuần từ tool
-            2. TUYỆT ĐỐI KHÔNG thêm bất kỳ text nào trước hoặc sau JSON
-            3. KHÔNG được thêm câu giới thiệu như "Mình tìm thấy...", "Đây là kết quả..."
-            4. KHÔNG được tóm tắt, viết lại, hoặc chuyển sang markdown
-            5. KHÔNG được thay đổi bất kỳ field nào trong JSON
+            2. Bạn PHẢI trả về JSON NGUYÊN VẸN này cho user
+            3. KHÔNG được:
+               - Tóm tắt hay viết lại nội dung
+               - Chuyển sang markdown list
+               - Thay đổi cấu trúc JSON
+               - Thêm/bớt field nào
             
-            **Tool sẽ trả JSON với cấu trúc:**
-```json
+            4. CHỈ được phép:
+               - Thêm 1-2 câu nhận xét ngắn TRƯỚC JSON (không bắt buộc)
+               - Giữ NGUYÊN TOÀN BỘ JSON từ tool
+            
+            **Ví dụ response đúng:**
+            ```
+            Mình tìm thấy sản phẩm phù hợp với bạn rồi đây:
+            
             {
               "type": "product_list",
-              "message": "Tìm thấy X sản phẩm...",
-              "items": [...]
-            }
-```
-            
-            **Response ĐÚNG (chỉ JSON thuần):**
-```json
-            {
-              "type": "product_list",
-              "message": "Tìm thấy 3 sản phẩm cho: \\"áo hoodie\\"",
+              "message": "Tìm thấy 3 sản phẩm cho: \"áo hoodie\"",
               "items": [
                 {
                   "id": "68ff149c6a32474c840bb4a8",
@@ -92,31 +104,21 @@ public class ChatService {
                 }
               ]
             }
-```
+            ```
             
-            **Response SAI (TUYỆT ĐỐI KHÔNG làm):**
-            ❌ Mình tìm thấy sản phẩm phù hợp với bạn rồi đây:
-            {
-              "type": "product_list",
-              ...
-            }
-            
-            ❌ Đây là kết quả:
-```json
-            {...}
-```
-            
-            ❌ Tóm tắt thành markdown list
+            **Ví dụ response SAI (TUYỆT ĐỐI KHÔNG làm):**
+            ❌ "Mình tìm được 3 sản phẩm:
+                • Áo hoodie basic - 299,000đ
+                • ..."
+            ❌ Tóm tắt thành text
+            ❌ Thay đổi bất kỳ field nào trong JSON
             
             ## Định dạng trả về cho chính sách:
             - Khi trả về chính sách: tóm tắt nội dung chính + trích dẫn chi tiết nếu cần
-            - Có thể dùng markdown, thân thiện và hữu ích
+            - Luôn thân thiện và hữu ích
             """;
 
-    // ✅ Thêm ObjectMapper
-    private final ObjectMapper mapper = new ObjectMapper();
     private final ChatClient chatClient;
-    private final ChatMemory chatMemory; // ✅ Lưu reference để xử lý manually
     private final SearchProductsTool searchProductsTool;
     private final PolicySimpleTool policyTool;
 
@@ -131,20 +133,19 @@ public class ChatService {
                 searchProductsTool.getClass().getSimpleName(),
                 policyTool.getClass().getSimpleName());
 
-        // ✅ Lưu chatMemory để dùng sau
-        this.chatMemory = MessageWindowChatMemory.builder()
+        ChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(jdbcChatMemoryRepository)
                 .maxMessages(10)
                 .build();
 
-        // ✅ QUAN TRỌNG: Đăng ký tools với ChatClient (KHÔNG dùng advisor để tự xử lý)
+        // ✅ QUAN TRỌNG: Đăng ký tools với ChatClient
         this.chatClient = chatClientBuilder
-                .defaultTools(searchProductsTool, policyTool)
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .defaultTools(searchProductsTool, policyTool) // ✅ Đăng ký cả 2 tools
                 .build();
 
         log.info("✅ ChatClient initialized successfully with {} tools", 2);
     }
-
     private static String extractFirstJsonObject(String text) {
         if (text == null) return null;
         int start = text.indexOf('{');
@@ -172,7 +173,6 @@ public class ChatService {
         }
         return null;
     }
-
     /**
      * Chat với văn bản - để LLM tự quyết định dùng tool nào
      */
@@ -183,62 +183,37 @@ public class ChatService {
 
         log.info("💬 Chat request: conversationId={}, message='{}'", conversationId, request.message());
 
-        // ✅ Lấy lịch sử chat từ memory
-        List<org.springframework.ai.chat.messages.Message> history = chatMemory.get(conversationId);
-
-        // ✅ Tạo prompt với system + history + user message mới
-        List<org.springframework.ai.chat.messages.Message> messages = new ArrayList<>();
-        messages.add(new SystemMessage(SYSTEM_PROMPT));
-        messages.addAll(history);
-        messages.add(new UserMessage(request.message()));
-
-        Prompt prompt = new Prompt(messages);
+        Prompt prompt = new Prompt(
+                new SystemMessage(SYSTEM_PROMPT),
+                new UserMessage(request.message())
+        );
 
         try {
-            // ✅ Gọi API KHÔNG dùng advisor
             String raw = chatClient.prompt(prompt)
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                     .call()
                     .content();
 
-            log.info("✅ Raw response: {}", raw);
+            log.info("✅ Chat response generated successfully");
 
-            String finalResponse;
-
-            // ✅ Xử lý response để lấy JSON thuần
             if (raw != null && raw.contains("\"type\"") && raw.contains("product_list")) {
                 String json = extractFirstJsonObject(raw);
                 if (json != null) {
-                    try {
-                        // Validate JSON
-                        mapper.readTree(json);
-                        finalResponse = json; // ✅ Chỉ JSON thuần
-                        log.info("✅ Extracted clean JSON: {} chars", json.length());
-                    } catch (Exception e) {
-                        log.warn("⚠️ Invalid JSON extracted: {}", e.getMessage());
-                        finalResponse = "{\"type\":\"product_list\",\"message\":\"Lỗi định dạng kết quả\",\"items\":[]}";
-                    }
-                } else {
-                    log.warn("⚠️ Could not extract JSON from response");
-                    finalResponse = "{\"type\":\"product_list\",\"message\":\"Không tìm thấy JSON trong response\",\"items\":[]}";
+                    return json;
                 }
-            } else {
-                // Không phải product_list (chính sách, small talk)
-                finalResponse = raw;
+                // fallback: nếu không cắt được thì trả stub JSON để FE không lỗi
+                return "{\"type\":\"product_list\",\"message\":\"Lỗi định dạng kết quả\",\"items\":[]}";
             }
 
-            // ✅ Lưu vào ChatMemory MANUALLY với response đã clean
-            chatMemory.add(conversationId, new UserMessage(request.message()));
-            chatMemory.add(conversationId, new AssistantMessage(finalResponse));
-
-            log.info("✅ Saved to memory: user message + clean assistant response");
-
-            return finalResponse;
+            // Không phải product_list (vd: trả lời chính sách / small talk)
+            return raw;
 
         } catch (Exception e) {
             log.error("❌ Error calling Chat API: {}", e.getMessage(), e);
             return "{\"type\":\"product_list\",\"message\":\"Lỗi xử lý\",\"items\":[]}";
         }
     }
+
 
     /**
      * Chat với hình ảnh - ưu tiên tìm kiếm sản phẩm tương tự
@@ -262,13 +237,7 @@ public class ChatService {
         if (isProductSearchIntent) {
             try {
                 log.info("🔍 Attempting image-based product search...");
-                String result = searchProductsTool.searchProductsByImage(file, 5, 0.8);
-
-                // ✅ Lưu vào memory
-                chatMemory.add(cid, new UserMessage("[Người dùng đã gửi ảnh để tìm sản phẩm tương tự]"));
-                chatMemory.add(cid, new AssistantMessage(result));
-
-                return result;
+                return searchProductsTool.searchProductsByImage(file, 5, 0.8);
             } catch (Exception ex) {
                 log.warn("⚠️ Image search failed, falling back to vision chat. Error: {}", ex.getMessage());
             }
@@ -289,22 +258,14 @@ public class ChatService {
                 .build();
 
         try {
-            // ✅ Lấy history
-            List<org.springframework.ai.chat.messages.Message> history = chatMemory.get(cid);
-
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
-                    .messages(history)
                     .user(u -> u.media(media).text(message))
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, cid))
                     .call()
                     .content();
 
             log.info("✅ Vision chat response generated successfully");
-
-            // ✅ Lưu vào memory
-            chatMemory.add(cid, new UserMessage("[Người dùng đã gửi ảnh với text: " + message + "]"));
-            chatMemory.add(cid, new AssistantMessage(response));
-
             return response;
 
         } catch (Exception e) {
@@ -328,7 +289,7 @@ public class ChatService {
                 name = "searchProducts",
                 description = "Tìm kiếm sản phẩm theo từ khóa văn bản. Sử dụng công cụ này khi người dùng hỏi về sản phẩm, giá cả, tìm đồ. " +
                         "Tool này sẽ trả về JSON với cấu trúc {type, message, items[]}. " +
-                        "LLM CHỈ được trả về JSON nguyên vẹn, TUYỆT ĐỐI KHÔNG thêm text nào khác."
+                        "LLM PHẢI trả về JSON nguyên vẹn cho user, KHÔNG được tóm tắt hay chuyển sang markdown."
         )
         public String searchProducts(
                 @org.springframework.ai.tool.annotation.ToolParam(description = "Từ khóa tìm kiếm (ví dụ: áo hoodie đen, giày thể thao)") String query,
@@ -363,7 +324,7 @@ public class ChatService {
                 }
 
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list";
+                payload.type = "product_list"; // ✅ Thêm type
                 payload.message = (query == null || query.isBlank()) ? null
                         : ("Tìm thấy " + passed.size() + " sản phẩm cho: \"" + query + "\"");
 
@@ -373,7 +334,7 @@ public class ChatService {
                     ProductSearchPayload.Item it = new ProductSearchPayload.Item();
                     it.id = extractId(p);
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
-                    it.description = strOrDefault(p.get("description"), "");
+//                    it.description = strOrDefault(p.get("description"), "");
                     it.price = extractFirstPriceFromSizes(p.get("variants"));
                     it.discount = extractDouble(p.get("percentDiscount"), 0.0);
                     it.url = "/products/" + it.id;
@@ -395,7 +356,7 @@ public class ChatService {
                 name = "searchProductsByImage",
                 description = "Tìm kiếm sản phẩm tương tự dựa trên hình ảnh. Sử dụng khi người dùng upload ảnh và muốn tìm sản phẩm giống. " +
                         "Tool này sẽ trả về JSON với cấu trúc {type, message, items[]}. " +
-                        "LLM CHỈ được trả về JSON nguyên vẹn, TUYỆT ĐỐI KHÔNG thêm text nào khác."
+                        "LLM PHẢI trả về JSON nguyên vẹn cho user, KHÔNG được tóm tắt hay chuyển sang markdown."
         )
         public String searchProductsByImage(
                 @org.springframework.ai.tool.annotation.ToolParam(description = "File ảnh để tìm kiếm") MultipartFile image,
@@ -426,7 +387,7 @@ public class ChatService {
                 }
 
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list";
+                payload.type = "product_list"; // ✅ Thêm type
                 payload.message = "Tìm thấy " + filtered.size() + " sản phẩm tương tự từ hình ảnh";
                 payload.items = filtered.stream().map(r -> {
                     Map<String, Object> p = r.getProduct();
@@ -476,7 +437,7 @@ public class ChatService {
         private String emptyPayload(String query, String reason) {
             try {
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list";
+                payload.type = "product_list"; // ✅ Thêm type
                 payload.message = "Không tìm thấy sản phẩm phù hợp" +
                         (reason != null && !reason.isEmpty() ? " (" + reason + ")" : "");
                 payload.items = List.of();
