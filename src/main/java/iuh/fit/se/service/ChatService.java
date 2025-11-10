@@ -87,7 +87,6 @@ public class ChatService {
                   "name": "Áo hoodie basic",
                   "price": 299000.0,
                   "discount": 10.0,
-                  "description": "Áo hoodie cotton mềm mại",
                   "url": "/products/68ff149c6a32474c840bb4a8",
                   "imageUrl": "https://example.com/image.jpg"
                 }
@@ -434,7 +433,7 @@ public class ChatService {
                     ProductSearchPayload.Item it = new ProductSearchPayload.Item();
                     it.id = extractId(p);
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
-                    it.description = strOrDefault(p.get("description"), "");
+//                    it.description = strOrDefault(p.get("description"), "");
                     it.price = extractFirstPriceFromSizes(p.get("variants"));
                     it.discount = extractDouble(p.get("percentDiscount"), 0.0);
                     it.url = "/products/" + it.id;
