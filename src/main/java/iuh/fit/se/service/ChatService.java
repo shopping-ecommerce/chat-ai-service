@@ -133,14 +133,14 @@ public class ChatService {
                 searchProductsTool.getClass().getSimpleName(),
                 policyTool.getClass().getSimpleName());
 
-        ChatMemory chatMemory = MessageWindowChatMemory.builder()
-                .chatMemoryRepository(jdbcChatMemoryRepository)
-                .maxMessages(10)
-                .build();
+//        ChatMemory chatMemory = MessageWindowChatMemory.builder()
+//                .chatMemoryRepository(jdbcChatMemoryRepository)
+//                .maxMessages(10)
+//                .build();
 
         // ✅ QUAN TRỌNG: Đăng ký tools với ChatClient
         this.chatClient = chatClientBuilder
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+//                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .defaultTools(searchProductsTool, policyTool) // ✅ Đăng ký cả 2 tools
                 .build();
 
@@ -190,7 +190,7 @@ public class ChatService {
 
         try {
             String raw = chatClient.prompt(prompt)
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+//                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                     .call()
                     .content();
 
@@ -334,7 +334,6 @@ public class ChatService {
                     ProductSearchPayload.Item it = new ProductSearchPayload.Item();
                     it.id = extractId(p);
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
-//                    it.description = strOrDefault(p.get("description"), "");
                     it.price = extractFirstPriceFromSizes(p.get("variants"));
                     it.discount = extractDouble(p.get("percentDiscount"), 0.0);
                     it.url = "/products/" + it.id;
@@ -394,7 +393,6 @@ public class ChatService {
                     ProductSearchPayload.Item it = new ProductSearchPayload.Item();
                     it.id = extractId(p);
                     it.name = strOrDefault(p.get("name"), "(Chưa có tên)");
-//                    it.description = strOrDefault(p.get("description"), "");
                     it.price = extractFirstPriceFromSizes(p.get("variants"));
                     it.discount = extractDouble(p.get("percentDiscount"), 0.0);
                     it.url = "/products/" + it.id;
