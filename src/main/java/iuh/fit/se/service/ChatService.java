@@ -119,6 +119,7 @@ public class ChatService {
             """;
 
     private final ChatClient chatClient;
+    private final ChatMemory chatMemory;
     private final SearchProductsTool searchProductsTool;
     private final PolicySimpleTool policyTool;
 
@@ -133,19 +134,20 @@ public class ChatService {
                 searchProductsTool.getClass().getSimpleName(),
                 policyTool.getClass().getSimpleName());
 
-//        ChatMemory chatMemory = MessageWindowChatMemory.builder()
-//                .chatMemoryRepository(jdbcChatMemoryRepository)
-//                .maxMessages(10)
-//                .build();
+        // ✅ Khởi tạo ChatMemory (sẽ dùng có điều kiện)
+        this.chatMemory = MessageWindowChatMemory.builder()
+                .chatMemoryRepository(jdbcChatMemoryRepository)
+                .maxMessages(10)
+                .build();
 
-        // ✅ QUAN TRỌNG: Đăng ký tools với ChatClient
+        // ✅ QUAN TRỌNG: Đăng ký tools với ChatClient (KHÔNG đăng ký memory advisor mặc định)
         this.chatClient = chatClientBuilder
-//                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultTools(searchProductsTool, policyTool) // ✅ Đăng ký cả 2 tools
+                .defaultTools(searchProductsTool, policyTool)
                 .build();
 
         log.info("✅ ChatClient initialized successfully with {} tools", 2);
     }
+
     private static String extractFirstJsonObject(String text) {
         if (text == null) return null;
         int start = text.indexOf('{');
@@ -173,6 +175,34 @@ public class ChatService {
         }
         return null;
     }
+
+    /**
+     * Phát hiện xem có phải intent tìm kiếm sản phẩm không
+     */
+    private boolean isProductSearchIntent(String message) {
+        if (message == null || message.isBlank()) return false;
+
+        String lower = message.toLowerCase().trim();
+
+        // Danh sách từ khóa trigger tìm kiếm sản phẩm
+        String[] searchKeywords = {
+                "tìm", "search", "có", "show", "giới thiệu", "gợi ý",
+                "hiển thị", "xem", "cho tôi", "muốn mua",
+                "áo", "quần", "giày", "váy", "đồ", "sản phẩm",
+                "giá", "bao nhiêu", "giá bao nhiêu", "bán", "mua",
+                "hoodie", "sneaker", "jacket", "shirt", "dress"
+        };
+
+        for (String keyword : searchKeywords) {
+            if (lower.contains(keyword)) {
+                log.info("🔍 Detected product search intent with keyword: '{}'", keyword);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Chat với văn bản - để LLM tự quyết định dùng tool nào
      */
@@ -183,19 +213,31 @@ public class ChatService {
 
         log.info("💬 Chat request: conversationId={}, message='{}'", conversationId, request.message());
 
+        // ✅ Kiểm tra xem có phải tìm kiếm sản phẩm không
+        boolean isProductSearch = isProductSearchIntent(request.message());
+
         Prompt prompt = new Prompt(
                 new SystemMessage(SYSTEM_PROMPT),
                 new UserMessage(request.message())
         );
 
         try {
-            String raw = chatClient.prompt(prompt)
-//                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                    .call()
-                    .content();
+            var chatBuilder = chatClient.prompt(prompt);
 
-            log.info("✅ Chat response generated successfully");
+            // ✅ CHỈ thêm memory advisor khi KHÔNG phải search product
+            if (!isProductSearch) {
+                log.info("📝 Using chat memory for conversation: {}", conversationId);
+                chatBuilder.advisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                        .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId));
+            } else {
+                log.info("🚫 Skipping chat memory for product search");
+            }
 
+            String raw = chatBuilder.call().content();
+
+            log.info("✅ Chat response generated successfully (memory: {})", !isProductSearch);
+
+            // ✅ Xử lý response chứa product_list JSON
             if (raw != null && raw.contains("\"type\"") && raw.contains("product_list")) {
                 String json = extractFirstJsonObject(raw);
                 if (json != null) {
@@ -213,7 +255,6 @@ public class ChatService {
             return "{\"type\":\"product_list\",\"message\":\"Lỗi xử lý\",\"items\":[]}";
         }
     }
-
 
     /**
      * Chat với hình ảnh - ưu tiên tìm kiếm sản phẩm tương tự
@@ -236,14 +277,14 @@ public class ChatService {
 
         if (isProductSearchIntent) {
             try {
-                log.info("🔍 Attempting image-based product search...");
+                log.info("🔍 Attempting image-based product search (no memory)...");
                 return searchProductsTool.searchProductsByImage(file, 5, 0.8);
             } catch (Exception ex) {
                 log.warn("⚠️ Image search failed, falling back to vision chat. Error: {}", ex.getMessage());
             }
         }
 
-        // ✅ Fallback: gửi ảnh + text cho LLM phân tích
+        // ✅ Fallback: gửi ảnh + text cho LLM phân tích (có memory)
         org.springframework.util.MimeType mime = MimeTypeUtils.APPLICATION_OCTET_STREAM;
         try {
             if (file.getContentType() != null) {
@@ -258,9 +299,12 @@ public class ChatService {
                 .build();
 
         try {
+            log.info("📝 Using chat memory for vision chat: {}", cid);
+
             String response = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user(u -> u.media(media).text(message))
+                    .advisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, cid))
                     .call()
                     .content();
@@ -324,7 +368,7 @@ public class ChatService {
                 }
 
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list"; // ✅ Thêm type
+                payload.type = "product_list";
                 payload.message = (query == null || query.isBlank()) ? null
                         : ("Tìm thấy " + passed.size() + " sản phẩm cho: \"" + query + "\"");
 
@@ -386,7 +430,7 @@ public class ChatService {
                 }
 
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list"; // ✅ Thêm type
+                payload.type = "product_list";
                 payload.message = "Tìm thấy " + filtered.size() + " sản phẩm tương tự từ hình ảnh";
                 payload.items = filtered.stream().map(r -> {
                     Map<String, Object> p = r.getProduct();
@@ -435,7 +479,7 @@ public class ChatService {
         private String emptyPayload(String query, String reason) {
             try {
                 ProductSearchPayload payload = new ProductSearchPayload();
-                payload.type = "product_list"; // ✅ Thêm type
+                payload.type = "product_list";
                 payload.message = "Không tìm thấy sản phẩm phù hợp" +
                         (reason != null && !reason.isEmpty() ? " (" + reason + ")" : "");
                 payload.items = List.of();
