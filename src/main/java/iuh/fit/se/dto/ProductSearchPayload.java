@@ -15,7 +15,6 @@ public class ProductSearchPayload {
         public String name;
         public Double price; // VND
         public Double discount; // percent
-        public String description;
         public String url; // "/product/{id}"
         public String imageUrl; // ảnh đại diện
     }
