@@ -137,7 +137,7 @@ public class ChatService {
         // ✅ Khởi tạo ChatMemory (sẽ dùng có điều kiện)
         this.chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(jdbcChatMemoryRepository)
-                .maxMessages(10)
+                .maxMessages(2)
                 .build();
 
         // ✅ QUAN TRỌNG: Đăng ký tools với ChatClient (KHÔNG đăng ký memory advisor mặc định)
@@ -187,10 +187,25 @@ public class ChatService {
         // Danh sách từ khóa trigger tìm kiếm sản phẩm
         String[] searchKeywords = {
                 "tìm", "search", "có", "show", "giới thiệu", "gợi ý",
-                "hiển thị", "xem", "cho tôi", "muốn mua",
-                "áo", "quần", "giày", "váy", "đồ", "sản phẩm",
-                "giá", "bao nhiêu", "giá bao nhiêu", "bán", "mua",
-                "hoodie", "sneaker", "jacket", "shirt", "dress"
+                "hiển thị", "xem", "cho tôi", "muốn mua", "mua ở đâu",
+                "áo", "quần", "giày", "váy", "đồ", "sản phẩm", "phụ kiện",
+                "giá", "bao nhiêu", "giá bao nhiêu", "bán", "mua", "đặt hàng",
+                "hoodie", "sneaker", "jacket", "shirt", "dress", "túi xách",
+                "đồng hồ", "kính", "mũ", "nón", "giày thể thao", "giày cao gót",
+                "quần jean", "áo thun", "áo sơ mi", "áo khoác", "váy cưới",
+                "váy dạ hội", "đồ ngủ", "đồ bơi", "đồ tập gym", "đồ thể thao",
+                "điện thoại", "laptop", "máy tính bảng", "tai nghe", "loa",
+                "tivi", "máy ảnh", "máy quay", "đồ gia dụng", "tủ lạnh",
+                "máy giặt", "bếp", "nồi cơm", "quạt", "đèn", "đồ chơi",
+                "sách", "văn phòng phẩm", "mỹ phẩm", "nước hoa", "chăm sóc da",
+                "chăm sóc tóc", "thực phẩm", "đồ uống", "đồ ăn vặt", "thời trang nam",
+                "thời trang nữ", "thời trang trẻ em", "đồ dùng học tập", "đồ dùng nhà bếp",
+                "balo", "vali", "dụng cụ thể thao", "xe đạp", "xe máy", "phụ tùng",
+                "đồ điện tử", "máy lọc nước", "máy hút bụi", "máy lạnh", "máy sưởi",
+                "đồ nội thất", "ghế", "bàn", "giường", "tủ", "trang trí nhà cửa",
+                "đồ làm vườn", "cây cảnh", "hạt giống", "phân bón", "dụng cụ làm bếp",
+                "nồi chiên không dầu", "máy xay sinh tố", "máy ép trái cây", "bình giữ nhiệt",
+                "bình nước", "bình sữa", "đồ dùng trẻ em", "xe đẩy", "ghế ăn", "đồ chơi giáo dục"
         };
 
         for (String keyword : searchKeywords) {
